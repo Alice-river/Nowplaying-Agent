@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('relay', {
   status: (value) => ipcRenderer.send('relay:status', value),
   subStatus: (value) => ipcRenderer.send('relay:sub-status', value),
   serverState: (state) => ipcRenderer.send('relay:server-state', state),
+  command: (message) => ipcRenderer.send('relay:command', message),
 });

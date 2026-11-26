@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/discord-test.js && node test/relay-config-test.js",
+    "test": "node test/discord-test.js && node test/relay-config-test.js && node test/smtc-test.js && node test/control-test.js",
     "send": "node test/send.js",
     "dist": "electron-builder --win portable --publish never"
   },
@@ -31,8 +31,8 @@
       "discord.js",
       "png.js",
       "wnp.js",
-      "spotify.js",
-      "spotify-smtc.ps1",
+      "smtc.js",
+      "smtc.ps1",
       "preload.js",
       "widget.html",
       "widget.js",
@@ -41,11 +41,14 @@
       "relay-config.js",
       "relay-preload.js",
       "relay.html",
-      "relay.js"
+      "relay.js",
+      "control.js",
+      "control.ps1"
     ],
     "asarUnpack": [
       "node_modules/koffi/**/*.node",
-      "spotify-smtc.ps1"
+      "smtc.ps1",
+      "control.ps1"
     ],
     "win": {
       "target": "portable",

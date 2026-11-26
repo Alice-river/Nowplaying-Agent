@@ -1,7 +1,7 @@
 // サーバとの通信係。画面の無いウィンドウの中で、Chromium の WebSocket を使う。
 // こうすると、wss:// の宛先で、Windows の証明書ストアにある (秘密鍵を取り出せない)
 // クライアント証明書を、ブラウザと同じ仕組みでそのまま使える。
-//   /ws   送信: この PC の再生状態をサーバへ送る
+//   /ws   送信: この PC の再生状態をサーバへ送る。サーバからは、操作の指示を受け取る
 //   /sub  受信: サーバが持つ今の状態を受け取る (この PC が再生していないときの Discord 表示に使う)
 // このウィンドウは、設定で「サーバへ送る」がオンのあいだだけ作られる。
 let baseUrl = '';
@@ -72,7 +72,16 @@ function makeConnection({ path, onStatus, onMessage }) {
   };
 }
 
-const sender = makeConnection({ path: '/ws', onStatus: (s) => window.relay.status(s) });
+const sender = makeConnection({
+  path: '/ws',
+  onStatus: (s) => window.relay.status(s),
+  // この接続でサーバから届くのは、操作の指示だけ
+  onMessage: (text) => {
+    let msg;
+    try { msg = JSON.parse(text); } catch { return; }
+    if (msg && msg.type === 'command') window.relay.command({ id: msg.id, command: msg.command });
+  },
+});
 const receiver = makeConnection({
   path: '/sub',
   onStatus: (s) => window.relay.subStatus(s),

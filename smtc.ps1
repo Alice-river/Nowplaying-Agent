@@ -1,5 +1,7 @@
-﻿# Reads Spotify desktop playback info from Windows SMTC and prints one JSON line per second.
-# {"running":false} when Spotify is not found. Cover (base64) is attached only when the track changes.
+﻿# Reads the playback info of one desktop app from Windows SMTC and prints one JSON line per second.
+# -Match is a regular expression for the session's SourceAppUserModelId.
+# {"running":false} when the app is not found. Cover (base64) is attached only when the track changes.
+param([Parameter(Mandatory = $true)][string]$Match)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -42,7 +44,7 @@ while ($true) {
     if (-not $manager) { $manager = Await ($tManager::RequestAsync()) $tManager }
     $session = $null
     foreach ($s in $manager.GetSessions()) {
-      if ($s.SourceAppUserModelId -match 'spotify') { $session = $s; break }
+      if ($s.SourceAppUserModelId -match $Match) { $session = $s; break }
     }
     if (-not $session) {
       @{ running = $false } | ConvertTo-Json -Compress

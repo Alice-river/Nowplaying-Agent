@@ -6,8 +6,9 @@ const { Wnp, HANDSHAKE } = require('./wnp');
 const { trayIconPng } = require('./png');
 const { setAcrylic, clearAcrylic } = require('./acrylic');
 const { DiscordPresence } = require('./discord');
-const { SpotifySource } = require('./spotify');
+const { APPS, SmtcSource, pickView } = require('./smtc');
 const { DEFAULT_SERVER_URL, normalizeServerUrl, displayAddress } = require('./relay-config');
+const { Controller } = require('./control');
 
 const PORT = Number(process.env.NP_PORT) || 37250;
 const DEBUG = process.env.NP_DEBUG === '1';
@@ -23,9 +24,9 @@ if (process.env.NP_USERDATA) app.setPath('userData', process.env.NP_USERDATA);
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const wnp = new Wnp();
-const spotify = new SpotifySource({ log });
-// Spotify デスクトップが起動して曲の情報があれば、Web (WebNowPlaying) より優先する
-const currentView = () => spotify.view() || wnp.view();
+const desktop = APPS.map((a) => new SmtcSource(a, { log }));
+// デスクトップアプリ (SMTC) と Web (WebNowPlaying) のどれを出すかは pickView が決める
+const currentView = () => pickView(desktop.map((d) => d.view()), wnp.view());
 const sockets = new Set();
 let win = null;
 let tray = null;
@@ -35,9 +36,12 @@ let settingsWin = null;
 let previewOn = false;
 let saveTimer = null;
 let settings = { x: null, y: null, clickThrough: false, transparency: 25, blur: true,
-  discord: true, discordAppId: '', spotify: true,
+  discord: true, discordAppId: '', spotify: true, appleMusic: true,
   // サーバへの送信は、使う人がオンにするまで何も送らない
-  relay: false, serverUrl: DEFAULT_SERVER_URL, certIssuer: 'Console Private CA' };
+  relay: false, serverUrl: DEFAULT_SERVER_URL, certIssuer: 'Console Private CA',
+  // サーバや Web からの操作も、オンにするまで受け付けない
+  remoteControl: false };
+const controller = new Controller({ log });
 let relayWin = null;
 let relayStatus = 'off';
 let remoteState = null; // サーバが持つ今の状態 (/sub で受け取る)
@@ -71,6 +75,7 @@ function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch { /* 初回 */ }
   settings.transparency = clampPercent(settings.transparency);
   settings.relay = settings.relay === true;
+  settings.remoteControl = settings.remoteControl === true;
   settings.serverUrl = normalizeServerUrl(settings.serverUrl) || DEFAULT_SERVER_URL;
 }
 
@@ -165,6 +170,8 @@ function discordState(view) {
 // ---- サーバへの送信 ----
 const relayEnabled = () => settings.relay && process.env.NP_NO_RELAY !== '1';
 const relayUrl = () => normalizeServerUrl(process.env.NP_SERVER) || settings.serverUrl;
+// 操作は、サーバへの送信と「操作を受け付ける」の両方がオンのときだけ受け付ける
+const remoteEnabled = () => relayEnabled() && settings.remoteControl;
 
 const RELAY_LABEL = {
   off: '準備中', connecting: '接続しています', connected: '接続中',
@@ -220,6 +227,7 @@ function relayPublish(view, force) {
   if (!relayEnabled() || relayStatus !== 'connected' || !relayWin || relayWin.isDestroyed()) return;
   if (process.env.NP_NO_SEND === '1') return;
   const payload = relayPayload(view);
+  if (remoteEnabled()) payload.control = true; // サーバに、操作を受け付けることを知らせる
   const key = JSON.stringify({ ...payload, position: 0 });
   const now = Date.now();
   if (!force && key === lastRelayKey && now - lastRelayAt < 5000) return;
@@ -260,6 +268,35 @@ function applyRelay() {
   relayChanged();
 }
 
+// 実行役 (control.ps1) は、操作を受け付けるあいだだけ起動しておく
+function applyRemote() {
+  if (remoteEnabled()) controller.start(); else controller.stop();
+}
+
+function setRemote(on) {
+  settings.remoteControl = !!on;
+  saveSettings();
+  applyRemote();
+  updateTray();
+  relayPublish(currentView(), true);
+}
+
+// サーバから届いた操作を実行して、結果を返す
+async function handleCommand(message) {
+  const id = String((message && message.id) || '').slice(0, 64);
+  if (!id) return;
+  const command = String(message.command || '');
+  const result = remoteEnabled()
+    ? await controller.run(command, currentView())
+    : { ok: false, error: 'disabled' };
+  log('command', command, JSON.stringify(result));
+  if (relayWin && !relayWin.isDestroyed()) {
+    relayWin.webContents.send('relay:send', { v: 1, type: 'result', id, ...result });
+  }
+  // 再生の状態が変わるのを少し待ってから、知らせ直す
+  setTimeout(() => relayPublish(currentView(), true), 1500);
+}
+
 function relayChanged() {
   updateTray();
   sendToSettings('relay-status', relayLabel());
@@ -282,6 +319,10 @@ ipcMain.on('relay:sub-status', (event, status) => {
   if (!fromRelay(event)) return;
   log('relay (subscribe)', status);
   if (status !== 'connected') remoteState = null;
+});
+ipcMain.on('relay:command', (event, message) => {
+  if (!fromRelay(event)) return;
+  handleCommand(message);
 });
 ipcMain.on('relay:server-state', (event, state) => {
   if (!fromRelay(event)) return;
@@ -315,6 +356,7 @@ function setRelay(enabled, address) {
     if (relayStatus === 'connected') relayStatus = 'connecting';
   }
   applyRelay();
+  applyRemote();
   pushState();
   return { ok: true, enabled: settings.relay, address: displayAddress(url), url };
 }
@@ -351,16 +393,18 @@ ipcMain.handle('settings:get', () => ({
   transparency: settings.transparency, blur: settings.blur,
   autostart: app.isPackaged && app.getLoginItemSettings(loginItem() || {}).openAtLogin,
   canAutostart: app.isPackaged,
-  spotify: settings.spotify,
+  desktop: Object.fromEntries(APPS.map((a) => [a.key, !!settings[a.key]])),
   discord: settings.discord, discordAppId: settings.discordAppId,
   discordStatus: DISCORD_LABEL[discord.status] || discord.status,
   relay: settings.relay,
   serverAddress: displayAddress(settings.serverUrl),
   defaultAddress: displayAddress(DEFAULT_SERVER_URL),
   relayStatus: relayLabel(),
+  remoteControl: settings.remoteControl,
   serverOverride: normalizeServerUrl(process.env.NP_SERVER) || '',
 }));
 ipcMain.handle('settings:set-relay', (_event, { enabled, address }) => setRelay(enabled, address));
+ipcMain.on('settings:set-remote', (_event, on) => setRemote(on));
 ipcMain.on('settings:set-discord', (_event, { enabled, appId }) => {
   settings.discord = !!enabled;
   settings.discordAppId = String(appId || '').trim().slice(0, 30);
@@ -368,9 +412,11 @@ ipcMain.on('settings:set-discord', (_event, { enabled, appId }) => {
   saveTimer = setTimeout(saveSettings, 300);
   discord.configure({ enabled: settings.discord, appId: settings.discordAppId });
 });
-ipcMain.on('settings:set-spotify', (_event, on) => {
-  settings.spotify = !!on;
-  if (settings.spotify) spotify.start(); else spotify.stop();
+ipcMain.on('settings:set-desktop', (_event, { key, on }) => {
+  const source = desktop.find((d) => d.app.key === key);
+  if (!source) return;
+  settings[key] = !!on;
+  if (settings[key]) source.start(); else source.stop();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveSettings, 300);
 });
@@ -451,6 +497,11 @@ function updateTray() {
       },
     },
     {
+      label: 'サーバや Web からの操作を受け付ける', type: 'checkbox', checked: settings.remoteControl,
+      enabled: settings.relay,
+      click: (item) => { setRemote(item.checked); sendToSettings('remote-enabled', settings.remoteControl); },
+    },
+    {
       label: 'ウィジェットを隠す', type: 'checkbox', checked: forcedHidden,
       click: (item) => { forcedHidden = item.checked; pushState(); },
     },
@@ -480,16 +531,19 @@ app.whenReady().then(() => {
   updateTray();
   if (process.argv.includes('--settings')) openSettings();
   wnp.on('change', pushState);
-  spotify.on('change', pushState);
-  if (settings.spotify) spotify.start();
+  for (const source of desktop) {
+    source.on('change', pushState);
+    if (settings[source.app.key]) source.start();
+  }
   // あとから出た最前面ウィンドウに隠されないよう、ときどき一番上へ戻す
   setInterval(() => { if (win && !win.isDestroyed() && win.isVisible()) win.moveTop(); }, 3000);
   // 再生位置は動き続けるので、変化がなくても 5 秒ごとに渡す
   setInterval(() => { relayPublish(currentView(), true); discord.update(discordSource()); }, 5000);
   applyRelay();
+  applyRemote();
   discord.configure({ enabled: settings.discord, appId: settings.discordAppId });
   startServer();
 });
 
 app.on('window-all-closed', (e) => e.preventDefault());
-app.on('before-quit', () => { spotify.stop(); discord.close(); if (relayWin && !relayWin.isDestroyed()) relayWin.destroy(); });
+app.on('before-quit', () => { for (const source of desktop) source.stop(); discord.close(); controller.stop(); if (relayWin && !relayWin.isDestroyed()) relayWin.destroy(); });

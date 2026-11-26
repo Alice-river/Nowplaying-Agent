@@ -55,9 +55,10 @@
   <p id="dc-status">状態: 確認中</p>
   <p>Discord のデスクトップアプリが、この PC で起動している必要があります。ID は、Discord Developer Portal の「General Information」にあります。</p>
   <hr>
-  <h1>Spotify</h1>
-  <label class="check" style="margin-top:0"><input id="sp-on" type="checkbox" checked> Spotify (デスクトップ) を優先して表示する</label>
-  <p>Spotify アプリで再生中の曲があれば、ブラウザの再生より優先します。Spotify の設定で「メディアキーを使用するときにデスクトップのオーバーレイを表示する」をオンにしてください。</p>
+  <h1>デスクトップアプリ</h1>
+  <label class="check" style="margin-top:0"><input data-app="spotify" type="checkbox" checked> Spotify の再生を読み取る</label>
+  <label class="check" style="margin-top:8px"><input data-app="appleMusic" type="checkbox" checked> Apple Music の再生を読み取る</label>
+  <p>再生中のアプリ、再生中のブラウザ、停止中のアプリ、停止中のブラウザの順に、1 つを選びます。アプリ同士が同じ状態なら Spotify が先です。オフにしたアプリの再生は、表示もサーバへの送信 (記録) もされません。Spotify は、アプリの設定で「メディアキーを使用するときにデスクトップのオーバーレイを表示する」をオンにしてください。</p>
   <hr>
   <h1>サーバへの送信</h1>
   <label class="check" style="margin-top:0"><input id="rl-on" type="checkbox"> 再生中の曲をサーバへ送る</label>
@@ -70,6 +71,8 @@
   <p id="rl-status" role="status">状態: 確認中</p>
   <p>オンにすると、曲名・アーティスト・アルバム・カバー画像・再生位置・取得元を、宛先の NowPlaying サーバへ送ります。この形式の通信は暗号化されないので、VPN などの信頼できる経路にある宛先を指定してください。ポートを省くと 8000 になります。暗号化する場合は <code>wss://…/ws</code> の形で指定します。</p>
   <button id="rl-default" type="button">宛先を既定に戻す</button>
+  <label class="check"><input id="rc-on" type="checkbox"> サーバや Web からの操作を受け付ける</label>
+  <p>オンにすると、宛先のサーバとその統計ページから、再生の停止と再開、次の曲・前の曲、再生中のアプリの音量の上下ができます。サーバへの送信がオンのあいだだけ働きます。</p>
   <hr>
   <h1>一般</h1>
   <label class="check" style="margin-top:0"><input id="auto" type="checkbox"> Windows の起動時に自動で起動する</label>

@@ -26,8 +26,11 @@ document.getElementById('reset').addEventListener('click', () => {
   window.np.setBlur(true);
 });
 
-const spOn = document.getElementById('sp-on');
-spOn.addEventListener('change', () => window.np.setSpotify(spOn.checked));
+// data-app は smtc.js の APPS の key
+const desktopChecks = document.querySelectorAll('input[data-app]');
+for (const box of desktopChecks) {
+  box.addEventListener('change', () => window.np.setDesktop(box.dataset.app, box.checked));
+}
 
 const dcOn =document.getElementById('dc-on');
 const dcId = document.getElementById('dc-id');
@@ -75,16 +78,25 @@ document.getElementById('rl-default').addEventListener('click', () => applyRelay
 window.np.onRelayStatus((label) => { rlStatus.textContent = `状態: ${label}`; });
 window.np.onRelayEnabled((on) => { rlOn.checked = on; });
 
+const rcOn = document.getElementById('rc-on');
+rcOn.addEventListener('change', () => window.np.setRemote(rcOn.checked));
+// 送信がオフのあいだは、操作も受け付けないので、切り替えられないようにする
+rlOn.addEventListener('change', () => { rcOn.disabled = !rlOn.checked; });
+window.np.onRemoteEnabled((on) => { rcOn.checked = on; });
+window.np.onRelayEnabled((on) => { rcOn.disabled = !on; });
+
 window.np.getSettings().then((s) => {
   show(s.transparency);
   blur.checked = s.blur;
   auto.checked = s.autostart;
   auto.disabled = !s.canAutostart; // 開発中 (exe でないとき) は変えられない
-  spOn.checked = s.spotify;
+  for (const box of desktopChecks) box.checked = s.desktop[box.dataset.app];
   dcOn.checked = s.discord;
   dcId.value = s.discordAppId;
   dcStatus.textContent = `状態: ${s.discordStatus}`;
   rlOn.checked = s.relay;
+  rcOn.checked = s.remoteControl;
+  rcOn.disabled = !s.relay;
   rlSaved = s.serverAddress;
   rlDefault = s.defaultAddress;
   rlAddr.value = s.serverAddress;

@@ -7,10 +7,12 @@ contextBridge.exposeInMainWorld('np', {
   setDiscord: (enabled, appId) => ipcRenderer.send('settings:set-discord', { enabled: !!enabled, appId }),
   onDiscordStatus: (cb) => ipcRenderer.on('discord-status', (_event, label) => cb(label)),
   setAutostart: (on) => ipcRenderer.send('settings:set-autostart', !!on),
-  setSpotify: (on) => ipcRenderer.send('settings:set-spotify', !!on),
+  setDesktop: (key, on) => ipcRenderer.send('settings:set-desktop', { key: String(key), on: !!on }),
   setBlur: (on) => ipcRenderer.send('settings:set-blur', !!on),
   setRelay: (enabled, address) => ipcRenderer.invoke('settings:set-relay', { enabled: !!enabled, address: String(address) }),
   onRelayStatus: (cb) => ipcRenderer.on('relay-status', (_event, label) => cb(label)),
   onRelayEnabled: (cb) => ipcRenderer.on('relay-enabled', (_event, on) => cb(on)),
+  setRemote: (on) => ipcRenderer.send('settings:set-remote', !!on),
+  onRemoteEnabled: (cb) => ipcRenderer.on('remote-enabled', (_event, on) => cb(on)),
   setTransparency: (value) => ipcRenderer.send('settings:set-transparency', value),
 });
