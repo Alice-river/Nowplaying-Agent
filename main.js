@@ -7,7 +7,7 @@ const { trayIconPng } = require('./png');
 const { setAcrylic, clearAcrylic } = require('./acrylic');
 const { DiscordPresence } = require('./discord');
 const { APPS, SmtcSource, pickView } = require('./smtc');
-const { DEFAULT_SERVER_URL, normalizeServerUrl, displayAddress } = require('./relay-config');
+const { DEFAULT_SERVER_URL, normalizeServerUrl, displayAddress, statsExcluded } = require('./relay-config');
 const { Controller } = require('./control');
 
 const PORT = Number(process.env.NP_PORT) || 37250;
@@ -40,7 +40,9 @@ let settings = { x: null, y: null, clickThrough: false, transparency: 25, blur: 
   // サーバへの送信は、使う人がオンにするまで何も送らない
   relay: false, serverUrl: DEFAULT_SERVER_URL, certIssuer: 'Console Private CA',
   // サーバや Web からの操作も、オンにするまで受け付けない
-  remoteControl: false };
+  remoteControl: false,
+  // オンにすると、Spotify の曲はサーバの統計に記録しない (別に履歴を取り込む場合など)
+  skipSpotifyStats: false };
 const controller = new Controller({ log });
 let relayWin = null;
 let relayStatus = 'off';
@@ -76,6 +78,7 @@ function loadSettings() {
   settings.transparency = clampPercent(settings.transparency);
   settings.relay = settings.relay === true;
   settings.remoteControl = settings.remoteControl === true;
+  settings.skipSpotifyStats = settings.skipSpotifyStats === true;
   settings.serverUrl = normalizeServerUrl(settings.serverUrl) || DEFAULT_SERVER_URL;
 }
 
@@ -216,10 +219,12 @@ function coverForRelay(src) {
 function relayPayload(view) {
   if (!view) return { v: 1, type: 'state', state: 2, title: '', artist: '', album: '', source: '', cover: '', position: 0, duration: 0 };
   const s = discordState(view);
-  return {
+  const payload = {
     v: 1, type: 'state', state: s.state, title: s.title, artist: s.artist, album: s.album,
     source: s.source, cover: coverForRelay(view.cover), position: s.position, duration: s.duration,
   };
+  if (statsExcluded(settings, s.source)) payload.record = false;
+  return payload;
 }
 
 // 内容が変わったらすぐ、変わらないときは 5 秒ごとに送る (サーバは 30 秒黙ると停止扱いにする)
@@ -401,10 +406,16 @@ ipcMain.handle('settings:get', () => ({
   defaultAddress: displayAddress(DEFAULT_SERVER_URL),
   relayStatus: relayLabel(),
   remoteControl: settings.remoteControl,
+  skipSpotifyStats: settings.skipSpotifyStats,
   serverOverride: normalizeServerUrl(process.env.NP_SERVER) || '',
 }));
 ipcMain.handle('settings:set-relay', (_event, { enabled, address }) => setRelay(enabled, address));
 ipcMain.on('settings:set-remote', (_event, on) => setRemote(on));
+ipcMain.on('settings:set-skip-spotify', (_event, on) => {
+  settings.skipSpotifyStats = !!on;
+  saveSettings();
+  relayPublish(currentView(), true);
+});
 ipcMain.on('settings:set-discord', (_event, { enabled, appId }) => {
   settings.discord = !!enabled;
   settings.discordAppId = String(appId || '').trim().slice(0, 30);

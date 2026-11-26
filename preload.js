@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('np', {
   onRelayStatus: (cb) => ipcRenderer.on('relay-status', (_event, label) => cb(label)),
   onRelayEnabled: (cb) => ipcRenderer.on('relay-enabled', (_event, on) => cb(on)),
   setRemote: (on) => ipcRenderer.send('settings:set-remote', !!on),
+  setSkipSpotify: (on) => ipcRenderer.send('settings:set-skip-spotify', !!on),
   onRemoteEnabled: (cb) => ipcRenderer.on('remote-enabled', (_event, on) => cb(on)),
   setTransparency: (value) => ipcRenderer.send('settings:set-transparency', value),
 });

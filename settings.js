@@ -78,6 +78,9 @@ document.getElementById('rl-default').addEventListener('click', () => applyRelay
 window.np.onRelayStatus((label) => { rlStatus.textContent = `状態: ${label}`; });
 window.np.onRelayEnabled((on) => { rlOn.checked = on; });
 
+const ssOn = document.getElementById('ss-on');
+ssOn.addEventListener('change', () => window.np.setSkipSpotify(ssOn.checked));
+
 const rcOn = document.getElementById('rc-on');
 rcOn.addEventListener('change', () => window.np.setRemote(rcOn.checked));
 // 送信がオフのあいだは、操作も受け付けないので、切り替えられないようにする
@@ -95,6 +98,7 @@ window.np.getSettings().then((s) => {
   dcId.value = s.discordAppId;
   dcStatus.textContent = `状態: ${s.discordStatus}`;
   rlOn.checked = s.relay;
+  ssOn.checked = s.skipSpotifyStats;
   rcOn.checked = s.remoteControl;
   rcOn.disabled = !s.relay;
   rlSaved = s.serverAddress;

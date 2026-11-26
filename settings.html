@@ -71,6 +71,8 @@
   <p id="rl-status" role="status">状態: 確認中</p>
   <p>オンにすると、曲名・アーティスト・アルバム・カバー画像・再生位置・取得元を、宛先の NowPlaying サーバへ送ります。この形式の通信は暗号化されないので、VPN などの信頼できる経路にある宛先を指定してください。ポートを省くと 8000 になります。暗号化する場合は <code>wss://…/ws</code> の形で指定します。</p>
   <button id="rl-default" type="button">宛先を既定に戻す</button>
+  <label class="check"><input id="ss-on" type="checkbox"> Spotify は統計に記録しない</label>
+  <p>オンにすると、Spotify (アプリと Web 版) の曲は、サーバの統計に記録されません。ウィジェット、Discord、統計ページの再生中の表示と操作は、そのまま使えます。Spotify の履歴を別に取り込む場合に使います。</p>
   <label class="check"><input id="rc-on" type="checkbox"> サーバや Web からの操作を受け付ける</label>
   <p>オンにすると、宛先のサーバとその統計ページから、再生の停止と再開、次の曲・前の曲、再生中のアプリの音量の上下ができます。サーバへの送信がオンのあいだだけ働きます。</p>
   <hr>

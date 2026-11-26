@@ -1,6 +1,6 @@
 // 送信先の読み取り (relay-config.js) の確認
 const assert = require('assert');
-const { DEFAULT_SERVER_URL, normalizeServerUrl, displayAddress } = require('../relay-config');
+const { DEFAULT_SERVER_URL, normalizeServerUrl, displayAddress, statsExcluded } = require('../relay-config');
 
 const valid = [
   ['172.30.0.40', 'ws://172.30.0.40:8000/ws'],
@@ -35,5 +35,14 @@ for (const input of invalid) {
 assert.strictEqual(normalizeServerUrl(DEFAULT_SERVER_URL), DEFAULT_SERVER_URL);
 assert.strictEqual(displayAddress(DEFAULT_SERVER_URL), '172.30.0.40:8000');
 count += 2;
+
+for (const [on, source, expected] of [
+  [true, 'Spotify', true], [true, 'spotify', true], [true, 'Spotify Web Player', true],
+  [true, 'YouTube Music', false], [true, 'Apple Music', false], [true, 'SpotifyLike', false], [true, '', false],
+  [true, undefined, false], [false, 'Spotify', false],
+]) {
+  assert.strictEqual(statsExcluded({ skipSpotifyStats: on }, source), expected, `${on} ${source}`);
+  count += 1;
+}
 
 console.log(`relay-config: ${count} 項目すべて成功`);

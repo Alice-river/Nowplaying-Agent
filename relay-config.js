@@ -37,4 +37,10 @@ function displayAddress(serverUrl) {
   return `${url.hostname}:${url.port || '80'}`;
 }
 
-module.exports = { DEFAULT_SERVER_URL, DEFAULT_PORT, normalizeServerUrl, displayAddress };
+// 「Spotify は統計に記録しない」がオンのとき、取得元が Spotify (デスクトップアプリと Web 版) の曲は
+// 記録の対象から外す。表示と操作のために、状態そのものはサーバへ送る
+function statsExcluded(settings, source) {
+  return !!(settings && settings.skipSpotifyStats) && /^spotify\b/i.test(String(source || '').trim());
+}
+
+module.exports = { DEFAULT_SERVER_URL, DEFAULT_PORT, normalizeServerUrl, displayAddress, statsExcluded };
