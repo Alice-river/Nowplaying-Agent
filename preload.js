@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('np', {
   setAutostart: (on) => ipcRenderer.send('settings:set-autostart', !!on),
   setSpotify: (on) => ipcRenderer.send('settings:set-spotify', !!on),
   setBlur: (on) => ipcRenderer.send('settings:set-blur', !!on),
+  setRelay: (enabled, address) => ipcRenderer.invoke('settings:set-relay', { enabled: !!enabled, address: String(address) }),
+  onRelayStatus: (cb) => ipcRenderer.on('relay-status', (_event, label) => cb(label)),
+  onRelayEnabled: (cb) => ipcRenderer.on('relay-enabled', (_event, on) => cb(on)),
   setTransparency: (value) => ipcRenderer.send('settings:set-transparency', value),
 });

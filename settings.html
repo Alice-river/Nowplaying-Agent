@@ -5,7 +5,8 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'">
 <title>NowPlaying 設定</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; }
+  html { height: 100%; overflow-y: auto; scrollbar-color: #3a3c4c #15161d; }
+  body { margin: 0; }
   body {
     box-sizing: border-box; padding: 20px; background: #15161d; color: #e6e7ee;
     font-family: "Segoe UI Variable", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; font-size: 14px;
@@ -20,6 +21,11 @@
   .check input { accent-color: #8c96ff; width: 16px; height: 16px; }
   hr { border: 0; border-top: 1px solid #2c2d3a; margin: 20px 0 16px; }
   .field { display: block; margin: 14px 0 6px; }
+  .address { display: flex; gap: 8px; }
+  .address input { flex: 1; min-width: 0; }
+  .address button { margin: 0; white-space: nowrap; }
+  .error { color: #ffb4b4; margin-top: 6px; }
+  .error:empty { display: none; }
   input[type=text] { box-sizing: border-box; width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid #3a3c4c; background: #1d1e27; color: #e6e7ee; font: inherit; }
   p { margin: 14px 0 0; font-size: 12px; line-height: 1.6; color: #9a9cac; }
   button {
@@ -52,6 +58,18 @@
   <h1>Spotify</h1>
   <label class="check" style="margin-top:0"><input id="sp-on" type="checkbox" checked> Spotify (デスクトップ) を優先して表示する</label>
   <p>Spotify アプリで再生中の曲があれば、ブラウザの再生より優先します。Spotify の設定で「メディアキーを使用するときにデスクトップのオーバーレイを表示する」をオンにしてください。</p>
+  <hr>
+  <h1>サーバへの送信</h1>
+  <label class="check" style="margin-top:0"><input id="rl-on" type="checkbox"> 再生中の曲をサーバへ送る</label>
+  <label class="field" for="rl-addr">宛先 (IP アドレス)</label>
+  <div class="address">
+    <input id="rl-addr" type="text" autocomplete="off" spellcheck="false" placeholder="172.30.0.40:8000">
+    <button id="rl-apply" type="button">適用</button>
+  </div>
+  <p id="rl-error" class="error" role="alert"></p>
+  <p id="rl-status" role="status">状態: 確認中</p>
+  <p>オンにすると、曲名・アーティスト・アルバム・カバー画像・再生位置・取得元を、宛先の NowPlaying サーバへ送ります。この形式の通信は暗号化されないので、VPN などの信頼できる経路にある宛先を指定してください。ポートを省くと 8000 になります。暗号化する場合は <code>wss://…/ws</code> の形で指定します。</p>
+  <button id="rl-default" type="button">宛先を既定に戻す</button>
   <hr>
   <h1>一般</h1>
   <label class="check" style="margin-top:0"><input id="auto" type="checkbox"> Windows の起動時に自動で起動する</label>

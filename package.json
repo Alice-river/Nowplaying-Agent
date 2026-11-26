@@ -1,11 +1,11 @@
 {
   "name": "nowplaying",
-  "version": "1.1.0",
-  "description": "Chrome で再生中の曲を、デスクトップのウィジェットと Discord に表示する Windows 用アプリ",
+  "version": "1.2.0",
+  "description": "Chrome で再生中の曲を、デスクトップのウィジェットと Discord に表示し、任意で自分のサーバへ送る Windows 用アプリ",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/discord-test.js",
+    "test": "node test/discord-test.js && node test/relay-config-test.js",
     "send": "node test/send.js",
     "dist": "electron-builder --win portable --publish never"
   },
@@ -37,7 +37,11 @@
       "widget.html",
       "widget.js",
       "settings.html",
-      "settings.js"
+      "settings.js",
+      "relay-config.js",
+      "relay-preload.js",
+      "relay.html",
+      "relay.js"
     ],
     "asarUnpack": [
       "node_modules/koffi/**/*.node",
@@ -56,6 +60,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Alice-river/NowPlaying.git"
+    "url": "git+https://github.com/Alice-river/Nowplaying-Agent.git"
   }
 }

@@ -7,6 +7,7 @@ const { trayIconPng } = require('./png');
 const { setAcrylic, clearAcrylic } = require('./acrylic');
 const { DiscordPresence } = require('./discord');
 const { SpotifySource } = require('./spotify');
+const { DEFAULT_SERVER_URL, normalizeServerUrl, displayAddress } = require('./relay-config');
 
 const PORT = Number(process.env.NP_PORT) || 37250;
 const DEBUG = process.env.NP_DEBUG === '1';
@@ -34,7 +35,15 @@ let settingsWin = null;
 let previewOn = false;
 let saveTimer = null;
 let settings = { x: null, y: null, clickThrough: false, transparency: 25, blur: true,
-  discord: true, discordAppId: '', spotify: true };
+  discord: true, discordAppId: '', spotify: true,
+  // サーバへの送信は、使う人がオンにするまで何も送らない
+  relay: false, serverUrl: DEFAULT_SERVER_URL, certIssuer: 'Console Private CA' };
+let relayWin = null;
+let relayStatus = 'off';
+let remoteState = null; // サーバが持つ今の状態 (/sub で受け取る)
+let lastRelayKey = '';
+let lastRelayAt = 0;
+let lastRelayCover = '';
 
 const clampPercent = (v) => Math.min(100, Math.max(0, Math.round(Number(v)) || 0));
 // 透過率が高いほど、暗い色の重ねを薄くする
@@ -47,7 +56,7 @@ const discord = new DiscordPresence({
   log,
   onStatus: (status) => {
     updateTray();
-    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('discord-status', DISCORD_LABEL[status] || status);
+    sendToSettings('discord-status', DISCORD_LABEL[status] || status);
   },
 });
 
@@ -61,6 +70,8 @@ const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch { /* 初回 */ }
   settings.transparency = clampPercent(settings.transparency);
+  settings.relay = settings.relay === true;
+  settings.serverUrl = normalizeServerUrl(settings.serverUrl) || DEFAULT_SERVER_URL;
 }
 
 function saveSettings() {
@@ -124,7 +135,20 @@ function pushState() {
   const view = real || (previewOn ? sampleView() : null);
   if (view) win.webContents.send('state', view);
   applyVisibility(view);
-  discord.update(discordState(real));
+  relayPublish(real, false);
+  discord.update(discordSource());
+}
+
+// Discord に出すのは、この PC の再生が優先。この PC に何も無くて、サーバへの送信がオンなら、
+// サーバが持つ状態 (別の PC の再生) を出す
+function discordSource() {
+  const real = currentView();
+  if (real || !relayEnabled() || !remoteState) return discordState(real);
+  const s = remoteState;
+  return {
+    state: s.state, title: s.title, artist: s.artist, album: s.album, source: s.source,
+    cover: /^https:\/\//i.test(s.cover) ? s.cover : '', position: s.position, duration: s.duration,
+  };
 }
 
 // Discord へ渡す内容。確認用の表示は含めない。カバーは公開された https の URL だけ
@@ -138,10 +162,171 @@ function discordState(view) {
   };
 }
 
+// ---- サーバへの送信 ----
+const relayEnabled = () => settings.relay && process.env.NP_NO_RELAY !== '1';
+const relayUrl = () => normalizeServerUrl(process.env.NP_SERVER) || settings.serverUrl;
+
+const RELAY_LABEL = {
+  off: '準備中', connecting: '接続しています', connected: '接続中',
+  disconnected: '切れました (再接続中)', error: '失敗 (再接続中)',
+};
+function relayLabel() {
+  if (!relayEnabled()) return 'オフ (何も送りません)';
+  return RELAY_LABEL[relayStatus] || relayStatus;
+}
+
+// カバーは、公開された https の URL か、縮小した JPEG (data URI) だけをサーバへ送る
+const COVER_MAX_PX = 600;
+const COVER_MAX_CHARS = 150_000;
+let coverCache = { src: '', out: '' };
+function coverForRelay(src) {
+  if (!src) return '';
+  if (/^https:\/\//i.test(src)) return src.length <= 1000 ? src : '';
+  if (!/^data:image\//i.test(src)) return '';
+  if (coverCache.src === src) return coverCache.out;
+  let out = '';
+  try {
+    // SMTC の画像は、申告された種類 (jpeg) と中身 (PNG) が違うことがある。createFromBuffer は中身で見分ける
+    const buf = Buffer.from(src.slice(src.indexOf(',') + 1), 'base64');
+    let image = nativeImage.createFromBuffer(buf);
+    const { width, height } = image.getSize();
+    if (Math.max(width, height) > COVER_MAX_PX) {
+      image = image.resize(width >= height ? { width: COVER_MAX_PX, quality: 'best' } : { height: COVER_MAX_PX, quality: 'best' });
+    }
+    if (!image.isEmpty()) {
+      for (const q of [85, 70, 50, 30]) {
+        out = 'data:image/jpeg;base64,' + image.toJPEG(q).toString('base64');
+        if (out.length <= COVER_MAX_CHARS) break;
+        out = '';
+      }
+    }
+  } catch { out = ''; }
+  coverCache = { src, out };
+  return out;
+}
+
+// サーバへ送る内容。確認用の表示は送らない
+function relayPayload(view) {
+  if (!view) return { v: 1, type: 'state', state: 2, title: '', artist: '', album: '', source: '', cover: '', position: 0, duration: 0 };
+  const s = discordState(view);
+  return {
+    v: 1, type: 'state', state: s.state, title: s.title, artist: s.artist, album: s.album,
+    source: s.source, cover: coverForRelay(view.cover), position: s.position, duration: s.duration,
+  };
+}
+
+// 内容が変わったらすぐ、変わらないときは 5 秒ごとに送る (サーバは 30 秒黙ると停止扱いにする)
+function relayPublish(view, force) {
+  if (!relayEnabled() || relayStatus !== 'connected' || !relayWin || relayWin.isDestroyed()) return;
+  if (process.env.NP_NO_SEND === '1') return;
+  const payload = relayPayload(view);
+  const key = JSON.stringify({ ...payload, position: 0 });
+  const now = Date.now();
+  if (!force && key === lastRelayKey && now - lastRelayAt < 5000) return;
+  lastRelayKey = key;
+  lastRelayAt = now;
+  // 画像 (data URI) は大きいので、曲が変わったときと、つなぎ直したときだけ送る
+  const coverKey = payload.cover.startsWith('data:') ? `${payload.title}\n${payload.artist}\n${payload.cover}` : '';
+  const repeat = coverKey !== '' && coverKey === lastRelayCover;
+  lastRelayCover = coverKey;
+  relayWin.webContents.send('relay:send', repeat ? { ...payload, cover: '', keepCover: true } : payload);
+}
+
+// 設定に合わせて、通信係のウィンドウを作る / 閉じる / 宛先を変える
+function applyRelay() {
+  const alive = relayWin && !relayWin.isDestroyed();
+  if (!relayEnabled()) {
+    // ウィンドウごと閉じると、送信と受信の両方の接続が切れる
+    if (alive) relayWin.destroy();
+    relayWin = null;
+    relayStatus = 'off';
+    remoteState = null;
+  } else if (!alive) {
+    relayStatus = 'off';
+    relayWin = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'relay-preload.js'), contextIsolation: true, sandbox: true,
+        backgroundThrottling: false,
+      },
+    });
+    const created = relayWin;
+    created.webContents.on('console-message', (e) => log('relay console:', e.message));
+    created.webContents.on('did-finish-load', () => created.webContents.send('relay:config', { url: relayUrl() }));
+    created.loadFile(path.join(__dirname, 'relay.html'));
+  } else if (!relayWin.webContents.isLoading()) {
+    relayWin.webContents.send('relay:config', { url: relayUrl() });
+  }
+  relayChanged();
+}
+
+function relayChanged() {
+  updateTray();
+  sendToSettings('relay-status', relayLabel());
+}
+
+// 通信係のウィンドウ以外からの通知や、閉じたあとに届いた通知は無視する
+const fromRelay = (event) => relayWin && !relayWin.isDestroyed() && event.sender === relayWin.webContents;
+
+ipcMain.on('relay:status', (event, status) => {
+  if (!fromRelay(event)) return;
+  relayStatus = status;
+  log('relay', status, relayUrl());
+  relayChanged();
+  if (status === 'connected') {
+    lastRelayCover = '';
+    relayPublish(currentView(), true);
+  }
+});
+ipcMain.on('relay:sub-status', (event, status) => {
+  if (!fromRelay(event)) return;
+  log('relay (subscribe)', status);
+  if (status !== 'connected') remoteState = null;
+});
+ipcMain.on('relay:server-state', (event, state) => {
+  if (!fromRelay(event)) return;
+  remoteState = state;
+  discord.update(discordSource());
+});
+
+// サーバの証明書に問題があるときは、つながない (記録だけ残す)
+app.on('certificate-error', (_event, _webContents, url, error, _certificate, callback) => {
+  console.error('[np] server certificate error:', error, url);
+  callback(false);
+});
+
+// サーバがクライアント証明書を求めたら、Windows の証明書ストアから選ぶ。秘密鍵はファイルに出さない
+app.on('select-client-certificate', (event, _webContents, _url, list, callback) => {
+  event.preventDefault();
+  const pick = settings.certIssuer && list.find((c) => (c.issuerName || '').includes(settings.certIssuer));
+  log('client certificate:', pick ? `selected (${pick.subjectName})` : `none matched among ${list.length}`);
+  if (pick) callback(pick); else callback();
+});
+
+function setRelay(enabled, address) {
+  const url = normalizeServerUrl(address);
+  if (!url) return { ok: false, error: '宛先を読み取れません。例: 192.168.1.10 または 192.168.1.10:8000' };
+  const changed = url !== settings.serverUrl;
+  settings.relay = !!enabled;
+  settings.serverUrl = url;
+  saveSettings();
+  if (changed) {
+    remoteState = null;
+    if (relayStatus === 'connected') relayStatus = 'connecting';
+  }
+  applyRelay();
+  pushState();
+  return { ok: true, enabled: settings.relay, address: displayAddress(url), url };
+}
+
+function sendToSettings(channel, value) {
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send(channel, value);
+}
+
 function openSettings() {
   if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.show(); settingsWin.focus(); return; }
   settingsWin = new BrowserWindow({
-    width: 380, height: 830, useContentSize: true, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    width: 380, height: Math.min(1100, screen.getPrimaryDisplay().workArea.height - 60), useContentSize: true, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
     title: 'NowPlaying 設定', backgroundColor: '#15161d', autoHideMenuBar: true, show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   });
@@ -169,7 +354,13 @@ ipcMain.handle('settings:get', () => ({
   spotify: settings.spotify,
   discord: settings.discord, discordAppId: settings.discordAppId,
   discordStatus: DISCORD_LABEL[discord.status] || discord.status,
+  relay: settings.relay,
+  serverAddress: displayAddress(settings.serverUrl),
+  defaultAddress: displayAddress(DEFAULT_SERVER_URL),
+  relayStatus: relayLabel(),
+  serverOverride: normalizeServerUrl(process.env.NP_SERVER) || '',
 }));
+ipcMain.handle('settings:set-relay', (_event, { enabled, address }) => setRelay(enabled, address));
 ipcMain.on('settings:set-discord', (_event, { enabled, appId }) => {
   settings.discord = !!enabled;
   settings.discordAppId = String(appId || '').trim().slice(0, 30);
@@ -249,8 +440,16 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `127.0.0.1:${PORT} で待ち受け (${connected ? `接続 ${sockets.size}` : '未接続'})`, enabled: false },
     { label: `Discord: ${DISCORD_LABEL[discord.status] || discord.status}`, enabled: false },
+    { label: `サーバへの送信: ${relayLabel()}`, enabled: false },
     { type: 'separator' },
-    { label: '設定… (透過率)', click: openSettings },
+    { label: '設定…', click: openSettings },
+    {
+      label: 'サーバへ送信する', type: 'checkbox', checked: settings.relay,
+      click: (item) => {
+        setRelay(item.checked, settings.serverUrl);
+        sendToSettings('relay-enabled', settings.relay);
+      },
+    },
     {
       label: 'ウィジェットを隠す', type: 'checkbox', checked: forcedHidden,
       click: (item) => { forcedHidden = item.checked; pushState(); },
@@ -286,10 +485,11 @@ app.whenReady().then(() => {
   // あとから出た最前面ウィンドウに隠されないよう、ときどき一番上へ戻す
   setInterval(() => { if (win && !win.isDestroyed() && win.isVisible()) win.moveTop(); }, 3000);
   // 再生位置は動き続けるので、変化がなくても 5 秒ごとに渡す
-  setInterval(() => discord.update(discordState(currentView())), 5000);
+  setInterval(() => { relayPublish(currentView(), true); discord.update(discordSource()); }, 5000);
+  applyRelay();
   discord.configure({ enabled: settings.discord, appId: settings.discordAppId });
   startServer();
 });
 
 app.on('window-all-closed', (e) => e.preventDefault());
-app.on('before-quit', () => { spotify.stop(); discord.close(); });
+app.on('before-quit', () => { spotify.stop(); discord.close(); if (relayWin && !relayWin.isDestroyed()) relayWin.destroy(); });

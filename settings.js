@@ -42,6 +42,39 @@ dcOn.addEventListener('change', sendDiscord);
 dcId.addEventListener('input', sendDiscord);
 window.np.onDiscordStatus((label) => { dcStatus.textContent = `状態: ${label}`; });
 
+const rlOn = document.getElementById('rl-on');
+const rlAddr = document.getElementById('rl-addr');
+const rlError = document.getElementById('rl-error');
+const rlStatus = document.getElementById('rl-status');
+let rlSaved = '';
+let rlDefault = '';
+
+// 宛先は、入力の途中でつなぎ直さないように、「適用」か Enter、チェックの切り替えで反映する
+async function applyRelay(address) {
+  const result = await window.np.setRelay(rlOn.checked, address);
+  if (result.ok) {
+    rlSaved = result.address;
+    rlAddr.value = result.address;
+    rlError.textContent = '';
+  } else {
+    rlError.textContent = result.error;
+  }
+  return result.ok;
+}
+rlOn.addEventListener('change', async () => {
+  // 入力中の宛先が読み取れないときは、保存済みの宛先のまま切り替える
+  if (!await applyRelay(rlAddr.value)) {
+    const message = rlError.textContent;
+    await applyRelay(rlSaved);
+    rlError.textContent = message;
+  }
+});
+document.getElementById('rl-apply').addEventListener('click', () => applyRelay(rlAddr.value));
+rlAddr.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyRelay(rlAddr.value); });
+document.getElementById('rl-default').addEventListener('click', () => applyRelay(rlDefault));
+window.np.onRelayStatus((label) => { rlStatus.textContent = `状態: ${label}`; });
+window.np.onRelayEnabled((on) => { rlOn.checked = on; });
+
 window.np.getSettings().then((s) => {
   show(s.transparency);
   blur.checked = s.blur;
@@ -51,4 +84,10 @@ window.np.getSettings().then((s) => {
   dcOn.checked = s.discord;
   dcId.value = s.discordAppId;
   dcStatus.textContent = `状態: ${s.discordStatus}`;
+  rlOn.checked = s.relay;
+  rlSaved = s.serverAddress;
+  rlDefault = s.defaultAddress;
+  rlAddr.value = s.serverAddress;
+  rlStatus.textContent = `状態: ${s.relayStatus}`;
+  if (s.serverOverride) rlError.textContent = `環境変数 NP_SERVER の宛先 (${s.serverOverride}) を使っています。`;
 });
